@@ -13,7 +13,7 @@
     "express": "3.4.8",
     "express-handlebars": "^3.0.0",
     "lru-cache": "^4.1.1",
-    "xero-node": "^2.*.*"
+    "xero-node": "jordanwalsh23/xero-node#87483125ed6b1bcd1bf53b2727dcb13c7874e7b6"
   },
   "engines": {
     "node": ">=6.0.0"
