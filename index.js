@@ -1,76 +1,18 @@
-var express = require('express'),
-    xero = require('xero-node'),
-    exphbs = require('express-handlebars'),
-    fs = require('fs');
+'use strict';
+
+const express = require('express');
+const session = require('express-session');
+const xero = require('xero-node');
+const exphbs = require('express-handlebars');
+const fs = require('fs');
 
 var xeroClient;
 var eventReceiver;
 var metaConfig = {};
 
-function getXeroClient(session) {
-
-    try {
-        metaConfig = require('./config/config.json');
-    } catch (ex) {
-        if (process && process.env && process.env.APPTYPE) {
-            //no config file found, so check the process.env.
-            metaConfig.APPTYPE = process.env.APPTYPE;
-            metaConfig[metaConfig.APPTYPE.toLowerCase()] = {
-                authorizeCallbackUrl: process.env.authorizeCallbackUrl,
-                userAgent: process.env.userAgent,
-                consumerKey: process.env.consumerKey,
-                consumerSecret: process.env.consumerSecret
-            }
-        } else {
-            throw "Config not found";
-        }
-    }
-
-    if (!xeroClient) {
-        var APPTYPE = metaConfig.APPTYPE;
-        var config = metaConfig[APPTYPE.toLowerCase()];
-
-        if (session) {
-            if (session.oauthAccessToken && session.oauthAccessSecret) {
-                config.accessToken = session.oauthAccessToken;
-                config.accessSecret = session.oauthAccessSecret;
-            }
-        }
-
-        if (config.privateKeyPath && !config.privateKey) {
-            try {
-                //Try to read from the path
-                config.privateKey = fs.readFileSync(config.privateKeyPath);
-            } catch (ex) {
-                //It's not a path, so use the consumer secret as the private key
-                config.privateKey = "";
-            }
-        }
-
-
-        switch (APPTYPE) {
-            case "PUBLIC":
-                xeroClient = new xero.PublicApplication(config);
-                break;
-            case "PARTNER":
-                xeroClient = new xero.PartnerApplication(config);
-                eventReceiver = xeroClient.eventEmitter;
-                eventReceiver.on('xeroTokenUpdate', function(data) {
-                    //Store the data that was received from the xeroTokenRefresh event
-                    console.log("Received xero token refresh: ", data);
-                });
-                break;
-            default:
-                throw "No App Type Set!!"
-        }
-    }
-
-    return xeroClient;
-}
-
 var app = express();
 
-var exphbs = exphbs.create({
+var exbhbsEngine = exphbs.create({
     defaultLayout: 'main',
     layoutsDir: __dirname + '/views/layouts',
     partialsDir: [
@@ -118,20 +60,80 @@ var exphbs = exphbs.create({
     }
 });
 
-app.engine('handlebars', exphbs.engine);
+app.engine('handlebars', exbhbsEngine.engine);
 
 app.set('view engine', 'handlebars');
 app.set('views', __dirname + '/views');
 
 app.use(express.logger());
 app.use(express.bodyParser());
-app.use(express.cookieParser());
-app.use(express.session({ secret: '123456' }));
+
+app.set('trust proxy', 1);
+app.use(session({
+    secret: 'something crazy',
+    resave: false,
+    saveUninitialized: true,
+    cookie: { secure: false }
+}));
+
 app.use(express.static(__dirname + '/assets'));
-// app.use(express.cookieSession({ secret: 'sfsdfsdfsdfsdf234234234fd', cookie: { maxAge: 123467654456 } }));
+
+function getXeroClient(session) {
+    try {
+        metaConfig = require('./config/config.json');
+    } catch (ex) {
+        if (process && process.env && process.env.APPTYPE) {
+            //no config file found, so check the process.env.
+            metaConfig.APPTYPE = process.env.APPTYPE;
+            metaConfig[metaConfig.APPTYPE.toLowerCase()] = {
+                authorizeCallbackUrl: process.env.authorizeCallbackUrl,
+                userAgent: process.env.userAgent,
+                consumerKey: process.env.consumerKey,
+                consumerSecret: process.env.consumerSecret
+            }
+        } else {
+            throw "Config not found";
+        }
+    }
+  
+    var APPTYPE = metaConfig.APPTYPE;
+    var config = metaConfig[APPTYPE.toLowerCase()];
+
+    if (session && session.token) {
+        config.accessToken = session.token.oauth_token;
+        config.accessSecret = session.token.oauth_token_secret;
+    }
+
+    if (config.privateKeyPath && !config.privateKey) {
+        try {
+            //Try to read from the path
+            config.privateKey = fs.readFileSync(config.privateKeyPath);
+        } catch (ex) {
+            //It's not a path, so use the consumer secret as the private key
+            config.privateKey = "";
+        }
+    }
+
+    switch (APPTYPE) {
+        case "PUBLIC":
+            xeroClient = new xero.PublicApplication(config);
+            break;
+        case "PARTNER":
+            xeroClient = new xero.PartnerApplication(config);
+            eventReceiver = xeroClient.eventEmitter;
+            eventReceiver.on('xeroTokenUpdate', function(data) {
+                //Store the data that was received from the xeroTokenRefresh event
+                console.log("Received xero token refresh: ", data);
+            });
+            break;
+        default:
+            throw "No App Type Set!!"
+    }
+    return xeroClient;
+}
 
 function authorizeRedirect(req, res, returnTo) {
-    var xeroClient = getXeroClient(null, returnTo);
+    var xeroClient = getXeroClient(req.session, returnTo);
     xeroClient.getRequestToken(function(err, token, secret) {
         if (!err) {
             req.session.oauthRequestToken = token;
@@ -153,10 +155,10 @@ function authorizeRedirect(req, res, returnTo) {
 }
 
 function authorizedOperation(req, res, returnTo, callback) {
-    if (xeroClient) {
-        callback(xeroClient);
+    if (req.session.token) {
+      callback(getXeroClient(req.session));
     } else {
-        authorizeRedirect(req, res, returnTo);
+      authorizeRedirect(req, res, returnTo);
     }
 }
 
@@ -189,7 +191,10 @@ app.get('/access', function(req, res) {
 
     if (req.query.oauth_verifier && req.query.oauth_token == req.session.oauthRequestToken) {
         xeroClient.setAccessToken(req.session.oauthRequestToken, req.session.oauthRequestSecret, req.query.oauth_verifier)
-            .then(function() {
+            .then(function(token) {
+                req.session.token = token.results;
+                console.log(req.session);
+
                 var returnTo = req.session.returnto;
                 res.redirect(returnTo || '/');
             })
