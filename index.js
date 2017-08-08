@@ -1,7 +1,6 @@
 var express = require('express'),
     xero = require('xero-node'),
     exphbs = require('express-handlebars'),
-    LRU = require('lru-cache'),
     fs = require('fs');
 
 var xeroClient;
@@ -151,10 +150,7 @@ function authorizeRedirect(req, res, returnTo) {
             res.redirect('/error');
         }
     })
-
 }
-
-var cache = LRU();
 
 function authorizedOperation(req, res, returnTo, callback) {
     if (xeroClient) {

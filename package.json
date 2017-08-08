@@ -12,8 +12,7 @@
   "dependencies": {
     "express": "3.4.8",
     "express-handlebars": "^3.0.0",
-    "lru-cache": "^4.1.1",
-    "xero-node": "jordanwalsh23/xero-node#a10b4120582a56cde2440368fdf9ef8883b7a3c2"
+    "xero-node": "2.*.*"
   },
   "engines": {
     "node": ">=6.0.0"
