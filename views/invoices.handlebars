@@ -38,9 +38,7 @@
         <td>{{ this.Total }}</td>
         <td>
             {{#if this.HasAttachments }}
-                <a href="/attachments?entityID={{ this.InvoiceID }}&entityType=INVOICE">Download</a>
-            {{else}}
-                N/A
+                <a href="/attachments?entityID={{ this.InvoiceID }}&entityType=INVOICE">View</a>
             {{/if}}
         </td>
     </tr>

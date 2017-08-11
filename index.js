@@ -521,21 +521,62 @@ app.get('/attachments', function(req, res) {
                 .then(function(invoice) {
                     invoice.getAttachments()
                         .then(function(attachments) {
-                            //Get the reference to the attachment object
-                            var myAttachment = attachments[0];
-                            res.writeHead(200, {
-                                "Content-Type": myAttachment.MimeType,
-                                "Content-Disposition": "attachment; filename=" + myAttachment.FileName,
-                                "Content-Length": myAttachment.ContentLength
-                            });
-                            myAttachment.getContent(res);
+                            res.render('attachments', {
+                              attachments: attachments,
+                              InvoiceID: entityID,
+                              active: {
+                                  invoices: true,
+                                  nav: {
+                                      accounting: true
+                                  }
+                              }
+                          });
                         })
                         .catch(function(err) {
-                            handleErr(err, req, res, 'invoices');
+                            handleErr(err, req, res, 'attachments');
                         })
                 })
                 .catch(function(err) {
-                    handleErr(err, req, res, 'invoices');
+                    handleErr(err, req, res, 'attachments');
+                })
+
+        } else {
+            handleErr("No Attachments Found", req, res, 'index');
+        }
+    })
+});
+
+app.get('/download', function(req, res) {
+    authorizedOperation(req, res, '/attachments', function(xeroClient) {
+
+        var entityID = req.query && req.query.entityID ? req.query.entityID : null;
+        var entityType = req.query && req.query.entityType ? req.query.entityType : null;
+        var fileId = req.query && req.query.fileId ? req.query.fileId : null;
+
+        if (entityID && entityType && fileId) {
+
+            xeroClient.core.invoices.getInvoice(entityID)
+                .then(function(invoice) {
+                    invoice.getAttachments()
+                        .then(function(attachments) {
+                            attachments.forEach(attachment => {
+                              //Get the reference to the attachment object
+                              if(attachment.AttachmentID === fileId) {
+                                res.writeHead(200, {
+                                    "Content-Type": attachment.MimeType,
+                                    "Content-Disposition": "attachment; filename=" + attachment.FileName,
+                                    "Content-Length": attachment.ContentLength
+                                });
+                                attachment.getContent(res);
+                              }
+                            });
+                        })
+                        .catch(function(err) {
+                            handleErr(err, req, res, 'attachments');
+                        })
+                })
+                .catch(function(err) {
+                    handleErr(err, req, res, 'attachments');
                 })
 
         } else {
