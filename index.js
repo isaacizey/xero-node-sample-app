@@ -531,7 +531,7 @@ app.get('/invoices', function(req, res) {
 
 app.get('/repeatinginvoices', function(req, res) {
     authorizedOperation(req, res, '/repeatinginvoices', function(xeroClient) {
-        xeroClient.core.repeatinginvoices.getRepeatingInvoices()
+        xeroClient.core.repeatingInvoices.getRepeatingInvoices()
             .then(function(repeatingInvoices) {
                 res.render('repeatinginvoices', {
                     repeatinginvoices: repeatingInvoices,
