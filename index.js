@@ -244,6 +244,26 @@ app.get('/brandingthemes', function(req, res) {
     })
 });
 
+app.get('/invoicereminders', function(req, res) {
+    authorizedOperation(req, res, '/invoicereminders', function(xeroClient) {
+        xeroClient.core.invoiceReminders.getInvoiceReminders()
+            .then(function(invoiceReminders) {
+                res.render('invoicereminders', {
+                    invoicereminders: invoiceReminders,
+                    active: {
+                        invoicereminders: true,
+                        nav: {
+                            accounting: true
+                        }
+                    }
+                });
+            })
+            .catch(function(err) {
+                handleErr(err, req, res, 'invoicereminders');
+            })
+    })
+});
+
 app.get('/taxrates', function(req, res) {
     authorizedOperation(req, res, '/taxrates', function(xeroClient) {
         xeroClient.core.taxRates.getTaxRates()
@@ -504,6 +524,27 @@ app.get('/invoices', function(req, res) {
             })
             .catch(function(err) {
                 handleErr(err, req, res, 'invoices');
+            })
+
+    })
+});
+
+app.get('/repeatinginvoices', function(req, res) {
+    authorizedOperation(req, res, '/repeatinginvoices', function(xeroClient) {
+        xeroClient.core.repeatinginvoices.getRepeatingInvoices()
+            .then(function(repeatingInvoices) {
+                res.render('repeatinginvoices', {
+                    repeatinginvoices: repeatingInvoices,
+                    active: {
+                        repeatinginvoices: true,
+                        nav: {
+                            accounting: true
+                        }
+                    }
+                });
+            })
+            .catch(function(err) {
+                handleErr(err, req, res, 'repeatinginvoices');
             })
 
     })
