@@ -36,4 +36,8 @@
     <li class="{{#if active.agedpayablesbycontact}}active{{/if}}"><a href="/reports?r=9">Aged Payables Report</a></li>
     <li class="{{#if active.tenninetynine}}active{{/if}}"><a href="/reports?r=10">1099 Report (US only)</a></li>
   </ul>
+   <h5 style="padding-top: 20px"><a href="#webhooks" data-toggle="collapse" style="text-decoration: none; color: black;">Webhooks</a></h5>
+  <ul id="webhooks" class="nav nav-sidebar {{#unless active.nav.webhooks}}collapse{{/unless}}">
+    <li class="{{#if active.webhook-contacts}}active{{/if}}"><a href="/webhooks?r=1">Contacts</a></li>
+  </ul>
 </div>

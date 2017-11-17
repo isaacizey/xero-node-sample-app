@@ -816,6 +816,57 @@ app.use('/createinvoice', function(req, res) {
     }
 });
 
+
+
+app.get('/webhooks', function(req, res) {
+    authorizedOperation(req, res, '/webhooks', function(xeroClient) {
+
+        var webhookskeys = {
+            '1': 'Contacts',
+            '2': 'TrialBalance'
+        };
+
+        var webhook = req.query ? req.query.r : null;
+
+        if (webhookskeys[webhook]) {
+            var selectedWebhook = webhookskeys[webhook];
+
+            var data = {
+                active: {
+                    nav: {
+                        reports: true
+                    }
+                }
+            };
+
+            data.active[selectedWebhook.toLowerCase()] = true;
+
+
+            if (selectedWebhook == 'Contacts') {
+                 res.render('webhook-contacts', data);
+               
+            } else if (selectedWebhook == 'Invoices') {
+                
+            } else {
+                
+            }
+
+        } else {
+            res.render('index', {
+                error: {
+                    message: "Report not found"
+                },
+                active: {
+                    overview: true
+                }
+            });
+        }
+    })
+});
+
+
+
+
 app.use(function(req, res, next) {
     if (req.session)
         delete req.session.returnto;
