@@ -97,7 +97,25 @@ function getXeroClient() {
             eventReceiver.on('xeroTokenUpdate', function(data) {
                 //Store the data that was received from the xeroTokenRefresh event
                 console.log("Received xero token refresh: ", data);
+                console.log("Store this in a DB");
                 debugger;
+
+
+
+                // Now that that data was store in a DB use it to create a new SdK object
+
+                let newXeroClient = new xero.PartnerApplication(config);
+                newXeroClient.setOptions(data);
+
+                newXeroClient.core.users.getUsers()
+                    .then(function(users) {
+                      console.log('USERS: ', users);
+                    })
+                    .catch(function(err) {
+                        handleErr(err, req, res, 'users');
+                    })
+
+
             });
             break;
         default:
