@@ -20,25 +20,16 @@ You'll then need to modify the config file available at `xero-node-sample-app/co
 
 ```javascript
 {
-    "APPTYPE": "PARTNER",
-    "partner": {
-        "authorizeCallbackUrl": "https://example.com/xerocallback",
-        "consumerKey": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
-        "privateKeyPath": "/some/path/to/privatekey.pem",
-        "userAgent": "Tester (PARTNER) - Application for testing Xero"
-    },
-    "public": {
-        "authorizeCallbackUrl": "https://example.com/xerocallback",
-        "consumerKey": "AAAAAAAAAAAAAAAAAA",
-        "consumerSecret": "BBBBBBBBBBBBBBBBBBBB",
-        "userAgent": "Tester (PUBLIC) - Application for testing Xero"
-    }
+    "appType": "partner",
+    "consumerKey": "aaa",
+    "consumerSecret": "bbb",
+    "privateKeyPath": "C:\\keys\\privatekey.pem",
+    "callbackUrl": "http://localhost:3100/access"
 }
 ```
 
-* The `APPTYPE` determines whether you would like to run the sample app using your public or partner credentials.
+* The `appType` determines whether you would like to run the sample app using your public or partner credentials.
 * The consumerKey/Secret should be provided depending on your app type
-* The User-Agent can be left as is.
 
 Save this file as: `xero-node-sample-app/config/config.json`.
 

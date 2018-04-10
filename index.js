@@ -2,13 +2,8 @@
 
 const express = require('express');
 const session = require('express-session');
-const xero = require('xero-node');
+const XeroClient = require('xero-node').AccountingAPIClient;;
 const exphbs = require('express-handlebars');
-const fs = require('fs');
-
-var xeroClient;
-var eventReceiver;
-var metaConfig = {};
 
 var app = express();
 
@@ -79,86 +74,39 @@ app.use(session({
 app.use(express.static(__dirname + '/assets'));
 
 function getXeroClient(session) {
+    let config = {};
     try {
-        metaConfig = require('./config/config.json');
+        config = require('./config/config.json');
     } catch (ex) {
         if (process && process.env && process.env.APPTYPE) {
             //no config file found, so check the process.env.
-            metaConfig.APPTYPE = process.env.APPTYPE;
-            metaConfig[metaConfig.APPTYPE.toLowerCase()] = {
-                authorizeCallbackUrl: process.env.authorizeCallbackUrl,
-                userAgent: process.env.userAgent,
-                consumerKey: process.env.consumerKey,
-                consumerSecret: process.env.consumerSecret
-            }
+            config.appType = process.env.APPTYPE.toLowerCase();
+            config.callbackUrl = process.env.authorizeCallbackUrl;
+            config.consumerKey = process.env.consumerKey;
+            config.consumerSecret = process.env.consumerSecret;
         } else {
             throw "Config not found";
         }
     }
-  
-    var APPTYPE = metaConfig.APPTYPE;
-    var config = metaConfig[APPTYPE.toLowerCase()];
 
-    if (session && session.token) {
-        config.accessToken = session.token.oauth_token;
-        config.accessSecret = session.token.oauth_token_secret;
-    }
-
-    if (config.privateKeyPath && !config.privateKey) {
-        try {
-            //Try to read from the path
-            config.privateKey = fs.readFileSync(config.privateKeyPath);
-        } catch (ex) {
-            //It's not a path, so use the consumer secret as the private key
-            config.privateKey = "";
-        }
-    }
-
-    switch (APPTYPE) {
-        case "PUBLIC":
-            xeroClient = new xero.PublicApplication(config);
-            break;
-        case "PARTNER":
-            xeroClient = new xero.PartnerApplication(config);
-            eventReceiver = xeroClient.eventEmitter;
-            eventReceiver.on('xeroTokenUpdate', function(data) {
-                //Store the data that was received from the xeroTokenRefresh event
-                console.log("Received xero token refresh: ", data);
-            });
-            break;
-        default:
-            throw "No App Type Set!!"
-    }
-    return xeroClient;
+    return new XeroClient(config, session);
 }
 
-function authorizeRedirect(req, res, returnTo) {
-    var xeroClient = getXeroClient(req.session, returnTo);
-    xeroClient.getRequestToken(function(err, token, secret) {
-        if (!err) {
-            req.session.oauthRequestToken = token;
-            req.session.oauthRequestSecret = secret;
-            req.session.returnto = returnTo;
+async function authorizeRedirect(req, res, returnTo) {
+    var xeroClient = getXeroClient(req.session);
+    let requestToken = await xeroClient.oauth1Client.getRequestToken();
 
-            //Note: only include this scope if payroll is required for your application.
-            var PayrollScope = 'payroll.employees,payroll.payitems,payroll.timesheets';
-            var AccountingScope = '';
-
-            var authoriseUrl = xeroClient.buildAuthorizeUrl(token, {
-                scope: AccountingScope
-            });
-            res.redirect(authoriseUrl);
-        } else {
-            res.redirect('/error');
-        }
-    })
+    var authoriseUrl = xeroClient.oauth1Client.buildAuthoriseUrl(requestToken);
+    req.session.oauthRequestToken = requestToken;
+    req.session.returnTo = returnTo;
+    res.redirect(authoriseUrl);
 }
 
 function authorizedOperation(req, res, returnTo, callback) {
-    if (req.session.token) {
-      callback(getXeroClient(req.session));
+    if (req.session.accessToken) {
+        callback(getXeroClient(req.session.accessToken));
     } else {
-      authorizeRedirect(req, res, returnTo);
+        authorizeRedirect(req, res, returnTo);
     }
 }
 
@@ -186,70 +134,66 @@ app.get('/', function(req, res) {
 });
 
 // Redirected from xero with oauth results
-app.get('/access', function(req, res) {
+app.get('/access', async function(req, res) {
     var xeroClient = getXeroClient();
 
-    if (req.query.oauth_verifier && req.query.oauth_token == req.session.oauthRequestToken) {
-        xeroClient.setAccessToken(req.session.oauthRequestToken, req.session.oauthRequestSecret, req.query.oauth_verifier)
-            .then(function(token) {
-                req.session.token = token.results;
-                console.log(req.session);
+    let savedRequestToken = req.session.oauthRequestToken;
+    let oauth_verifier = req.query.oauth_verifier;
+    let accessToken = await xeroClient.oauth1Client.swapRequestTokenforAccessToken(savedRequestToken, oauth_verifier);
 
-                var returnTo = req.session.returnto;
-                res.redirect(returnTo || '/');
-            })
-            .catch(function(err) {
-                handleErr(err, req, res, 'error');
-            })
-    }
+    req.session.accessToken = accessToken;
+
+    var returnTo = req.session.returnTo;
+    res.redirect(returnTo || '/');
 });
 
-app.get('/organisations', function(req, res) {
-    authorizedOperation(req, res, '/organisations', function(xeroClient) {
-        xeroClient.core.organisations.getOrganisations()
-            .then(function(organisations) {
-                res.render('organisations', {
-                    organisations: organisations,
-                    active: {
-                        organisations: true,
-                        nav: {
-                            accounting: true
-                        }
+app.get('/organisations', async function(req, res) {
+    authorizedOperation(req, res, '/organisations', async function(xeroClient) {
+        try {
+            let organisations = await xeroClient.organisations.get()
+            res.render('organisations', {
+                organisations: organisations.Organisations,
+                active: {
+                    organisations: true,
+                    nav: {
+                        accounting: true
                     }
-                });
+                }
             })
-            .catch(function(err) {
-                handleErr(err, req, res, 'organisations');
-            })
+        } catch (err) {
+            handleErr(err, req, res, 'organisations');
+        }
+
     })
 });
 
-app.get('/brandingthemes', function(req, res) {
-    authorizedOperation(req, res, '/brandingthemes', function(xeroClient) {
-        xeroClient.core.brandingThemes.getBrandingThemes()
-            .then(function(brandingthemes) {
-                res.render('brandingthemes', {
-                    brandingthemes: brandingthemes,
-                    active: {
-                        brandingthemes: true,
-                        nav: {
-                            accounting: true
-                        }
+app.get('/brandingthemes', async function(req, res) {
+    authorizedOperation(req, res, '/brandingthemes', async function(xeroClient) {
+        try {
+            let brandingThemes = await xeroClient.brandingThemes.get();
+
+            res.render('brandingthemes', {
+                brandingthemes: brandingThemes.BrandingThemes,
+                active: {
+                    brandingthemes: true,
+                    nav: {
+                        accounting: true
                     }
-                });
-            })
-            .catch(function(err) {
-                handleErr(err, req, res, 'brandingthemes');
-            })
+                }
+            });
+
+        } catch (error) {
+            handleErr(error, req, res, 'brandingthemes');
+        }
     })
 });
 
-app.get('/invoicereminders', function(req, res) {
+app.get('/invoicereminders', async function(req, res) {
     authorizedOperation(req, res, '/invoicereminders', function(xeroClient) {
-        xeroClient.core.invoiceReminders.getInvoiceReminders()
-            .then(function(invoiceReminders) {
+        xeroClient.invoiceReminders.get()
+            .then(function(result) {
                 res.render('invoicereminders', {
-                    invoicereminders: invoiceReminders,
+                    invoicereminders: result.InvoiceReminders,
                     active: {
                         invoicereminders: true,
                         nav: {
@@ -264,12 +208,12 @@ app.get('/invoicereminders', function(req, res) {
     })
 });
 
-app.get('/taxrates', function(req, res) {
+app.get('/taxrates', async function(req, res) {
     authorizedOperation(req, res, '/taxrates', function(xeroClient) {
-        xeroClient.core.taxRates.getTaxRates()
-            .then(function(taxrates) {
+        xeroClient.taxRates.get()
+            .then(function(result) {
                 res.render('taxrates', {
-                    taxrates: taxrates,
+                    taxrates: result.TaxRates,
                     active: {
                         taxrates: true,
                         nav: {
@@ -284,12 +228,12 @@ app.get('/taxrates', function(req, res) {
     })
 });
 
-app.get('/users', function(req, res) {
+app.get('/users', async function(req, res) {
     authorizedOperation(req, res, '/users', function(xeroClient) {
-        xeroClient.core.users.getUsers()
-            .then(function(users) {
+        xeroClient.users.get()
+            .then(function(result) {
                 res.render('users', {
-                    users: users,
+                    users: result.Users,
                     active: {
                         users: true,
                         nav: {
@@ -304,13 +248,13 @@ app.get('/users', function(req, res) {
     })
 });
 
-app.get('/contacts', function(req, res) {
+app.get('/contacts', async function(req, res) {
     authorizedOperation(req, res, '/contacts', function(xeroClient) {
         var contacts = [];
-        xeroClient.core.contacts.getContacts({ pager: { callback: pagerCallback } })
-            .then(function() {
+        xeroClient.contacts.get()
+            .then(function(result) {
                 res.render('contacts', {
-                    contacts: contacts,
+                    contacts: result.Contacts,
                     active: {
                         contacts: true,
                         nav: {
@@ -322,20 +266,15 @@ app.get('/contacts', function(req, res) {
             .catch(function(err) {
                 handleErr(err, req, res, 'contacts');
             })
-
-        function pagerCallback(err, response, cb) {
-            contacts.push.apply(contacts, response.data);
-            cb()
-        }
     })
 });
 
-app.get('/currencies', function(req, res) {
+app.get('/currencies', async function(req, res) {
     authorizedOperation(req, res, '/currencies', function(xeroClient) {
-        xeroClient.core.currencies.getCurrencies()
-            .then(function(currencies) {
+        xeroClient.currencies.get()
+            .then(function(result) {
                 res.render('currencies', {
-                    currencies: currencies,
+                    currencies: result.Currencies,
                     active: {
                         currencies: true,
                         nav: {
@@ -350,13 +289,13 @@ app.get('/currencies', function(req, res) {
     })
 });
 
-app.get('/banktransactions', function(req, res) {
+app.get('/banktransactions', async function(req, res) {
     authorizedOperation(req, res, '/banktransactions', function(xeroClient) {
         var bankTransactions = [];
-        xeroClient.core.bankTransactions.getBankTransactions({ pager: { callback: pagerCallback } })
-            .then(function() {
+        xeroClient.bankTransactions.get()
+            .then(function(result) {
                 res.render('banktransactions', {
-                    bankTransactions: bankTransactions,
+                    bankTransactions: result.BankTransactions,
                     active: {
                         banktransactions: true,
                         nav: {
@@ -368,21 +307,15 @@ app.get('/banktransactions', function(req, res) {
             .catch(function(err) {
                 handleErr(err, req, res, 'banktransactions');
             })
-
-        function pagerCallback(err, response, cb) {
-            bankTransactions.push.apply(bankTransactions, response.data);
-            cb()
-        }
     })
 });
 
-app.get('/journals', function(req, res) {
+app.get('/journals', async function(req, res) {
     authorizedOperation(req, res, '/journals', function(xeroClient) {
-        var journals = [];
-        xeroClient.core.journals.getJournals({ pager: { callback: pagerCallback } })
-            .then(function() {
+        xeroClient.journals.get()
+            .then(function(result) {
                 res.render('journals', {
-                    journals: journals,
+                    journals: result.Journals,
                     active: {
                         journals: true,
                         nav: {
@@ -394,21 +327,15 @@ app.get('/journals', function(req, res) {
             .catch(function(err) {
                 handleErr(err, req, res, 'journals');
             })
-
-        function pagerCallback(err, response, cb) {
-            journals.push.apply(journals, response.data);
-            cb()
-        }
     })
 });
 
-app.get('/banktransfers', function(req, res) {
+app.get('/banktransfers', async function(req, res) {
     authorizedOperation(req, res, '/banktransfers', function(xeroClient) {
-        var bankTransfers = [];
-        xeroClient.core.bankTransfers.getBankTransfers({ pager: { callback: pagerCallback } })
-            .then(function() {
+        xeroClient.bankTransfers.get()
+            .then(function(result) {
                 res.render('banktransfers', {
-                    bankTransfers: bankTransfers,
+                    bankTransfers: result.BankTransfers,
                     active: {
                         banktransfers: true,
                         nav: {
@@ -420,20 +347,15 @@ app.get('/banktransfers', function(req, res) {
             .catch(function(err) {
                 handleErr(err, req, res, 'banktransfers');
             })
-
-        function pagerCallback(err, response, cb) {
-            bankTransfers.push.apply(bankTransfers, response.data);
-            cb()
-        }
     })
 });
 
-app.get('/payments', function(req, res) {
+app.get('/payments', async function(req, res) {
     authorizedOperation(req, res, '/payments', function(xeroClient) {
-        xeroClient.core.payments.getPayments()
-            .then(function(payments) {
+        xeroClient.payments.get()
+            .then(function(result) {
                 res.render('payments', {
-                    payments: payments,
+                    payments: result.Payments,
                     active: {
                         payments: true,
                         nav: {
@@ -448,12 +370,12 @@ app.get('/payments', function(req, res) {
     })
 });
 
-app.get('/trackingcategories', function(req, res) {
+app.get('/trackingcategories', async function(req, res) {
     authorizedOperation(req, res, '/trackingcategories', function(xeroClient) {
-        xeroClient.core.trackingCategories.getTrackingCategories()
-            .then(function(trackingcategories) {
+        xeroClient.trackingCategories.get()
+            .then(function* (result) {
                 res.render('trackingcategories', {
-                    trackingcategories: trackingcategories,
+                    trackingcategories: result.TrackingCategories,
                     active: {
                         trackingcategories: true,
                         nav: {
@@ -468,12 +390,12 @@ app.get('/trackingcategories', function(req, res) {
     })
 });
 
-app.get('/accounts', function(req, res) {
+app.get('/accounts', async function(req, res) {
     authorizedOperation(req, res, '/accounts', function(xeroClient) {
-        xeroClient.core.accounts.getAccounts()
-            .then(function(accounts) {
+        xeroClient.accounts.get()
+            .then(function(result) {
                 res.render('accounts', {
-                    accounts: accounts,
+                    accounts: result.Accounts,
                     active: {
                         accounts: true,
                         nav: {
@@ -488,12 +410,12 @@ app.get('/accounts', function(req, res) {
     })
 });
 
-app.get('/creditnotes', function(req, res) {
+app.get('/creditnotes', async function(req, res) {
     authorizedOperation(req, res, '/creditnotes', function(xeroClient) {
-        xeroClient.core.creditNotes.getCreditNotes()
-            .then(function(creditnotes) {
+        xeroClient.creditNotes.get()
+            .then(function(result) {
                 res.render('creditnotes', {
-                    creditnotes: creditnotes,
+                    creditnotes: result.CreditNotes,
                     active: {
                         creditnotes: true,
                         nav: {
@@ -508,12 +430,12 @@ app.get('/creditnotes', function(req, res) {
     })
 });
 
-app.get('/invoices', function(req, res) {
+app.get('/invoices', async function(req, res) {
     authorizedOperation(req, res, '/invoices', function(xeroClient) {
-        xeroClient.core.invoices.getInvoices()
-            .then(function(invoices) {
+        xeroClient.invoices.get()
+            .then(function(result) {
                 res.render('invoices', {
-                    invoices: invoices,
+                    invoices: result.Invoices,
                     active: {
                         invoices: true,
                         nav: {
@@ -529,12 +451,12 @@ app.get('/invoices', function(req, res) {
     })
 });
 
-app.get('/repeatinginvoices', function(req, res) {
+app.get('/repeatinginvoices', async function(req, res) {
     authorizedOperation(req, res, '/repeatinginvoices', function(xeroClient) {
-        xeroClient.core.repeatinginvoices.getRepeatingInvoices()
-            .then(function(repeatingInvoices) {
+        xeroClient.repeatingInvoices.get()
+            .then(function(result) {
                 res.render('repeatinginvoices', {
-                    repeatinginvoices: repeatingInvoices,
+                    repeatinginvoices: result.RepeatingInvoices,
                     active: {
                         repeatinginvoices: true,
                         nav: {
@@ -550,88 +472,12 @@ app.get('/repeatinginvoices', function(req, res) {
     })
 });
 
-app.get('/attachments', function(req, res) {
-    authorizedOperation(req, res, '/attachments', function(xeroClient) {
-
-        var entityID = req.query && req.query.entityID ? req.query.entityID : null;
-        var entityType = req.query && req.query.entityType ? req.query.entityType : null;
-
-        if (entityID && entityType) {
-
-            xeroClient.core.invoices.getInvoice(entityID)
-                .then(function(invoice) {
-                    invoice.getAttachments()
-                        .then(function(attachments) {
-                            res.render('attachments', {
-                              attachments: attachments,
-                              InvoiceID: entityID,
-                              active: {
-                                  invoices: true,
-                                  nav: {
-                                      accounting: true
-                                  }
-                              }
-                          });
-                        })
-                        .catch(function(err) {
-                            handleErr(err, req, res, 'attachments');
-                        })
-                })
-                .catch(function(err) {
-                    handleErr(err, req, res, 'attachments');
-                })
-
-        } else {
-            handleErr("No Attachments Found", req, res, 'index');
-        }
-    })
-});
-
-app.get('/download', function(req, res) {
-    authorizedOperation(req, res, '/attachments', function(xeroClient) {
-
-        var entityID = req.query && req.query.entityID ? req.query.entityID : null;
-        var entityType = req.query && req.query.entityType ? req.query.entityType : null;
-        var fileId = req.query && req.query.fileId ? req.query.fileId : null;
-
-        if (entityID && entityType && fileId) {
-
-            xeroClient.core.invoices.getInvoice(entityID)
-                .then(function(invoice) {
-                    invoice.getAttachments()
-                        .then(function(attachments) {
-                            attachments.forEach(attachment => {
-                              //Get the reference to the attachment object
-                              if(attachment.AttachmentID === fileId) {
-                                res.writeHead(200, {
-                                    "Content-Type": attachment.MimeType,
-                                    "Content-Disposition": "attachment; filename=" + attachment.FileName,
-                                    "Content-Length": attachment.ContentLength
-                                });
-                                attachment.getContent(res);
-                              }
-                            });
-                        })
-                        .catch(function(err) {
-                            handleErr(err, req, res, 'attachments');
-                        })
-                })
-                .catch(function(err) {
-                    handleErr(err, req, res, 'attachments');
-                })
-
-        } else {
-            handleErr("No Attachments Found", req, res, 'index');
-        }
-    })
-});
-
-app.get('/items', function(req, res) {
+app.get('/items', async function(req, res) {
     authorizedOperation(req, res, '/items', function(xeroClient) {
-        xeroClient.core.items.getItems()
-            .then(function(items) {
+        xeroClient.items.get()
+            .then(function(result) {
                 res.render('items', {
-                    items: items,
+                    items: result.Items,
                     active: {
                         items: true,
                         nav: {
@@ -647,13 +493,12 @@ app.get('/items', function(req, res) {
     })
 });
 
-app.get('/manualjournals', function(req, res) {
+app.get('/manualjournals', async function(req, res) {
     authorizedOperation(req, res, '/manualjournals', function(xeroClient) {
-        var manualjournals = [];
-        xeroClient.core.manualjournals.getManualJournals({ pager: { callback: pagerCallback } })
-            .then(function() {
+        xeroClient.manualJournals.get()
+            .then(function(result) {
                 res.render('manualjournals', {
-                    manualjournals: manualjournals,
+                    manualjournals: result.ManualJournals,
                     active: {
                         manualjournals: true,
                         nav: {
@@ -665,154 +510,39 @@ app.get('/manualjournals', function(req, res) {
             .catch(function(err) {
                 handleErr(err, req, res, 'manualjournals');
             })
-
-        function pagerCallback(err, response, cb) {
-            manualjournals.push.apply(manualjournals, response.data);
-            cb()
-        }
     })
 });
 
-app.get('/reports', function(req, res) {
-    authorizedOperation(req, res, '/reports', function(xeroClient) {
-
-        var reportkeys = {
-            '1': 'BalanceSheet',
-            '2': 'TrialBalance',
-            '3': 'ProfitAndLoss',
-            '4': 'BankStatement',
-            '5': 'BudgetSummary',
-            '6': 'ExecutiveSummary',
-            '7': 'BankSummary',
-            '8': 'AgedReceivablesByContact',
-            '9': 'AgedPayablesByContact',
-            '10': 'TenNinetyNine'
-        };
-
-        var report = req.query ? req.query.r : null;
-
-        if (reportkeys[report]) {
-            var selectedReport = reportkeys[report];
-
-            var data = {
-                active: {
-                    nav: {
-                        reports: true
-                    }
-                }
-            };
-
-            data.active[selectedReport.toLowerCase()] = true;
-
-            /**
-             * We may need some dependent data:
-             * 
-             * BankStatement - requires a BankAccountId
-             * AgedReceivablesByContact - requires a ContactId
-             * AgedPayablesByContact - requires a ContactId
-             * 
-             */
-
-            if (selectedReport == 'BankStatement') {
-                xeroClient.core.accounts.getAccounts({ where: 'Type=="BANK"' })
-                    .then(function(accounts) {
-                        xeroClient.core.reports.generateReport({
-                                id: selectedReport,
-                                params: {
-                                    bankAccountID: accounts[0].AccountID
-                                }
-                            })
-                            .then(function(report) {
-                                data.report = report.toObject();
-                                data.colspan = data.report.Rows[0].Cells.length;
-                                res.render('reports', data);
-                            })
-                            .catch(function(err) {
-                                handleErr(err, req, res, 'reports');
-                            });
-                    })
-                    .catch(function(err) {
-                        handleErr(err, req, res, 'reports');
-                    });
-            } else if (selectedReport == 'AgedReceivablesByContact' || selectedReport == 'AgedPayablesByContact') {
-                xeroClient.core.contacts.getContacts()
-                    .then(function(contacts) {
-                        xeroClient.core.reports.generateReport({
-                                id: selectedReport,
-                                params: {
-                                    contactID: contacts[0].ContactID
-                                }
-                            })
-                            .then(function(report) {
-                                data.report = report.toObject();
-                                data.colspan = data.report.Rows[0].Cells.length;
-                                res.render('reports', data);
-                            })
-                            .catch(function(err) {
-                                handleErr(err, req, res, 'reports');
-                            });
-                    })
-                    .catch(function(err) {
-                        handleErr(err, req, res, 'reports');
-                    });
-            } else {
-                xeroClient.core.reports.generateReport({
-                        id: selectedReport
-                    })
-                    .then(function(report) {
-                        data.report = report.toObject();
-                        if (data.report.Rows) {
-                            data.colspan = data.report.Rows[0].Cells.length;
-                        }
-                        res.render('reports', data);
-                    })
-                    .catch(function(err) {
-                        handleErr(err, req, res, 'reports');
-                    });
-            }
-
-        } else {
-            res.render('index', {
-                error: {
-                    message: "Report not found"
-                },
-                active: {
-                    overview: true
-                }
-            });
-        }
-    })
-});
-
-app.use('/createinvoice', function(req, res) {
+app.use('/createinvoice', async function(req, res) {
     if (req.method == 'GET') {
         return res.render('createinvoice');
     } else if (req.method == 'POST') {
-        authorizedOperation(req, res, '/createinvoice', function(xeroClient) {
-            var invoice = xeroClient.core.invoices.newInvoice({
-                Type: req.body.Type,
-                Contact: {
-                    Name: req.body.Contact
-                },
-                DueDate: '2014-10-01',
-                LineItems: [{
-                    Description: req.body.Description,
-                    Quantity: req.body.Quantity,
-                    UnitAmount: req.body.Amount,
-                    AccountCode: 400,
-                    ItemCode: 'ABC123'
-                }],
-                Status: 'DRAFT'
-            });
-            invoice.save()
-                .then(function(ret) {
-                    res.render('createinvoice', { outcome: 'Invoice created', id: ret.entities[0].InvoiceID })
-                })
-                .catch(function(err) {
-                    res.render('createinvoice', { outcome: 'Error', err: err })
-                })
+        try {
+            authorizedOperation(req, res, '/createinvoice', async function(xeroClient) {
+                var invoice = await xeroClient.invoices.create({
+                    Type: req.body.Type,
+                    Contact: {
+                        Name: req.body.Contact
+                    },
+                    DueDate: '2014-10-01',
+                    LineItems: [{
+                        Description: req.body.Description,
+                        Quantity: req.body.Quantity,
+                        UnitAmount: req.body.Amount,
+                        AccountCode: 400,
+                        ItemCode: 'ABC123'
+                    }],
+                    Status: 'DRAFT'
+                });
 
-        })
+                res.render('createinvoice', { outcome: 'Invoice created', id: invoice.InvoiceID })
+
+            })
+        }
+        catch (err) {
+            res.render('createinvoice', { outcome: 'Error', err: err })
+
+        }
     }
 });
 
