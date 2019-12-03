@@ -5,11 +5,9 @@ This code base is for xero-node v3.x which is for OAuth 1.0a.
 Please see the [OAuth 2.0 kitchen sync app](https://github.com/XeroAPI/xero-node-oauth2-app) for use with xero-node 4.x
 
 ## OAuth1.0a deprecation
-Early December 2019 - No new OAuth 1.0a apps created.
-Mid December 2019 - OAuth 2.0 migration endpoint available to partner apps.
-December 2020 - OAuth 1.0a no longer supported for existing integrations.
-
-
+* Early December 2019 - No new OAuth 1.0a apps created.
+* Mid December 2019 - OAuth 2.0 migration endpoint available to partner apps.
+* December 2020 - OAuth 1.0a no longer supported for existing integrations.
 
 
 To help users get up and running with the xero-node SDK quickly, we've included a sample app that is written using the Express library.
