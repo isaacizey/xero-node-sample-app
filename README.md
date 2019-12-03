@@ -1,6 +1,6 @@
-# Xero Node - Sample Application
+# Xero Node - Sample Application (deprecation)
 
-This code base is for xero-node v3.x which is for OAuth 1.0a.  
+This code base is deprecated as it uses xero-node v3.x which is for OAuth 1.0a.  
 
 Please see the [OAuth 2.0 kitchen sync app](https://github.com/XeroAPI/xero-node-oauth2-app) for use with xero-node 4.x
 
